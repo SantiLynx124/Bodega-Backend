@@ -37,7 +37,12 @@ public class UsuarioController{
         return ResponseEntity.ok(usuarioService.listar().stream().map(UsuarioResponse::fromEntity).toList());
     }
 
-    //Buscar Usuario por id
+    @GetMapping("listar-desactivos")
+    public ResponseEntity<?> listarDesactivados(){
+        return ResponseEntity.ok(usuarioService.listarDesactivados().stream().map(UsuarioResponse::fromEntity).toList());
+    }
+
+    //Buscar Usuario por ID
     @GetMapping("/{id}")
     public ResponseEntity<?> buscarId(@Valid @PathVariable Long id){
         return ResponseEntity.ok(UsuarioResponse.fromEntity(usuarioService.buscarId(id)));
@@ -61,6 +66,7 @@ public class UsuarioController{
         return ResponseEntity.ok(UsuarioResponse.fromEntity(usuarioService.desactivarUsuario(id)));
     }
 
+    //Cambiar Contraseña
     @PatchMapping("/{id}/password")
     public ResponseEntity<?> cambiarContraseña(@Valid @PathVariable Long id,@Valid @RequestBody CambiarPasswordRequest request){
         return ResponseEntity.ok(UsuarioResponse.fromEntity(usuarioService.cambiarContraseña(id, request.getPassword())));

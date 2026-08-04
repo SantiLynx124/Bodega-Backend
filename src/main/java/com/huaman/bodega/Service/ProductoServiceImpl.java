@@ -44,6 +44,11 @@ public class ProductoServiceImpl implements ProductoService {
     }
 
     @Override
+    public List<Producto> ListarDesactivados() {
+        return productoRepository.findByEstadoFalse();
+    }
+
+    @Override
     public Producto Desactivar(Long id) {
         Producto productoFinal = BuscarId(id);
         productoFinal.setEstado(false);

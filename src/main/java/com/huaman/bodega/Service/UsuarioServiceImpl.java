@@ -37,7 +37,7 @@ public class UsuarioServiceImpl implements UsuarioService {
         return UsuarioRepository.save(usuarioFinal);
     }
 
-    //Buscar usuario por id
+    //Buscar usuario por ID
     @Override
     public Usuario buscarId(Long id) {
         return UsuarioRepository.findById(id).orElseThrow(() -> new UsuarioNoEncontradoException("El usuario con el id " + id + " no existe"));
@@ -55,9 +55,16 @@ public class UsuarioServiceImpl implements UsuarioService {
         return UsuarioRepository.findByNombreContainingIgnoreCase(nombre);
     }
 
+    //Listar todos los usuarios activos
     @Override
     public List<Usuario> listar() {
         return UsuarioRepository.findByEstadoTrue();
+    }
+
+    //Listar todos los usuarios desactivados
+    @Override
+    public List<Usuario> listarDesactivados() {
+        return UsuarioRepository.findByEstadoFalse();
     }
 
     //Activar usuario

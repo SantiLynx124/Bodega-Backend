@@ -14,6 +14,8 @@ public interface ProductoService {
 
     public List<Producto> Listar();
 
+    public List<Producto> ListarDesactivados();
+
     public Producto Desactivar(Long id);
 
     public Producto Activar(Long id);

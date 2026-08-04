@@ -21,6 +21,12 @@ public class ProductoController {
         return productoService.Listar();
     }
 
+    //Listar todos los productos desactivados
+    @GetMapping("/listar-desactivados")
+    public List<Producto> listarDesactivados(){
+        return productoService.ListarDesactivados();
+    }
+
     //Buscar por id
     @GetMapping("/{id}")
     public Producto buscarId(@Valid @PathVariable Long id){

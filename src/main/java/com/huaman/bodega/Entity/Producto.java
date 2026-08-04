@@ -4,7 +4,6 @@ import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -33,7 +32,7 @@ public class Producto {
     @Column(length = 100, nullable = false)
     private String marca;
 
-    //Discripcion
+    //Descripción
     @Column(length = 255, nullable = true)
     private String descripcion;
 

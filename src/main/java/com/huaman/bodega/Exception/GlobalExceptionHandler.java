@@ -53,4 +53,24 @@ public class GlobalExceptionHandler {
     public ResponseEntity<String> excepcionGeneral(Exception ex) {
         return ResponseEntity.status(500).body("Ocurrió un error inesperado en el servidor");
     }
+
+    @ExceptionHandler(ClienteNoEncontradoException.class)
+    public ResponseEntity<String> clienteNoEncontradoException(ClienteNoEncontradoException ex) {
+        return ResponseEntity.status(404).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(VentaInvalidaException.class)
+    public ResponseEntity<String> ventaInvalidaException(VentaInvalidaException ex) {
+        return ResponseEntity.status(409).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(VentaNoEncontradaException.class)
+    public ResponseEntity<String> ventaNoEncontradaException(VentaNoEncontradaException ex) {
+        return ResponseEntity.status(404).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(ClienteYaExisteException.class)
+    public ResponseEntity<String> clienteYaExisteException(ClienteYaExisteException ex) {
+        return ResponseEntity.status(409).body(ex.getMessage());
+    }
 }

@@ -21,8 +21,11 @@ public interface UsuarioService {
     //Buscar usuario por nombre
     public List<Usuario> buscarNombre(String nombre);
 
-    //Listar todos los usuarios
+    //Listar todos los usuarios activos
     public List<Usuario> listar();
+
+    //Listar todos los usuarios desactivados
+    public List<Usuario> listarDesactivados();
 
     //Activar usuario
     public Usuario activarUsuario(Long id);

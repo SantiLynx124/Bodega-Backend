@@ -13,5 +13,6 @@ public interface ProductoRepository extends JpaRepository<Producto, Long> {
 
     List<Producto> findByEstadoTrueAndNombreContainingIgnoreCaseOrEstadoTrueAndMarcaContainingIgnoreCase(String nombre, String marca);
     List<Producto> findByEstadoTrue();
+    List<Producto> findByEstadoFalse();
     boolean existsByNombreAndMarca(String nombre, String marca);
 }
