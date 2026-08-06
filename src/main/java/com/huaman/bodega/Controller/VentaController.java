@@ -41,6 +41,11 @@ public class VentaController {
         return ventaService.buscarId(id);
     }
 
+    @GetMapping("/cliente/{id}")
+    public List<Venta> buscarCliente(@PathVariable Long id) {
+        return ventaService.buscarCliente(id);
+    }
+
     @GetMapping
     public List<Venta> listar() {
         return ventaService.listar();
