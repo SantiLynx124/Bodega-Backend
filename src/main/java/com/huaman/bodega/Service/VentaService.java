@@ -11,5 +11,7 @@ public interface VentaService {
     VentaResponse registrar(CrearVentaRequest request, Usuario usuarioLogueado);
     Venta anular(Long id);
     Venta buscarId(Long id);
+    List<Venta> buscarCliente(Long clienteId);
+
     List<Venta> listar();
 }

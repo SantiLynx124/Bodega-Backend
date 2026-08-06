@@ -132,6 +132,2087 @@ build.gradle
 gradlew
 gradlew.bat
 README.md
+repomix-output1.xml
+settings.gradle
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="gradle/wrapper/gradle-wrapper.properties">
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-9.5.1-bin.zip
+networkTimeout=10000
+retries=0
+retryBackOffMs=500
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Config/AdminInitializer.java">
+package com.huaman.bodega.Config;
+
+import com.huaman.bodega.Entity.Rol;
+import com.huaman.bodega.Entity.Usuario;
+import com.huaman.bodega.Repository.UsuarioRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Component;
+
+@Component
+@RequiredArgsConstructor
+public class AdminInitializer implements CommandLineRunner {
+    private final UsuarioRepository usuarioRepository;
+    private final PasswordEncoder passwordEncoder;
+
+    @Override
+    public void run(String... args) {
+        if (!usuarioRepository.existsByRol(Rol.ADMINISTRADOR)) {
+            Usuario admin = new Usuario();
+            admin.setNombre("Administrador");
+            admin.setUsuario("admin");
+            admin.setPassword(passwordEncoder.encode("admin123")); // contraseña temporal
+            admin.setRol(Rol.ADMINISTRADOR);
+            admin.setEstado(true);
+            usuarioRepository.save(admin);
+            System.out.println("Admin por defecto creado: usuario=admin, password=admin123");
+        }
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Config/JwtAuthFilter.java">
+package com.huaman.bodega.Config;
+
+import com.auth0.jwt.interfaces.DecodedJWT;
+import com.huaman.bodega.Service.JwtService;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+
+@Component
+@RequiredArgsConstructor
+public class JwtAuthFilter extends OncePerRequestFilter {
+    private final JwtService jwtService;
+    private final UsuarioDetailsService usuarioDetailsService;
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+        String authorization = request.getHeader("Authorization");
+
+        if (authorization != null && authorization.startsWith("Bearer ")) {
+            String token = authorization.substring(7);
+
+            try{
+                DecodedJWT decodedJWT = jwtService.validarToken(token);
+                UserDetails userDetails = usuarioDetailsService.loadUserByUsername(decodedJWT.getSubject());
+                UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            } catch (Exception e){
+
+            }
+        }
+
+        filterChain.doFilter(request, response);
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Config/UsuarioDetails.java">
+package com.huaman.bodega.Config;
+
+import com.huaman.bodega.Entity.Usuario;
+import org.jspecify.annotations.Nullable;
+import org.springframework.security.authorization.AuthorityAuthorizationManager;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+
+import java.util.Collection;
+import java.util.List;
+
+import static org.springframework.security.authorization.AuthorityAuthorizationManager.hasRole;
+
+public class UsuarioDetails implements UserDetails {
+    private final Usuario usuario;
+
+    public UsuarioDetails(Usuario usuario) {
+        this.usuario = usuario;
+    }
+
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        String rolConPrefijo = "ROLE_" + usuario.getRol().name();
+        SimpleGrantedAuthority authority = new SimpleGrantedAuthority(rolConPrefijo);
+        return List.of(authority);
+    }
+
+    @Override
+    public @Nullable String getPassword() {
+        return usuario.getPassword();
+    }
+
+    @Override
+    public String getUsername() {
+        return usuario.getUsuario();
+    }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return usuario.isEstado();
+    }
+
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Config/UsuarioDetailsService.java">
+package com.huaman.bodega.Config;
+
+import com.huaman.bodega.Entity.Usuario;
+import com.huaman.bodega.Repository.UsuarioRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.stereotype.Service;
+
+@Service
+@RequiredArgsConstructor
+public class UsuarioDetailsService implements UserDetailsService {
+    private final UsuarioRepository usuarioRepository;
+
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        Usuario usuario = usuarioRepository.findByUsuario(username).orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
+        return new UsuarioDetails(usuario);
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Controller/AuthController.java">
+package com.huaman.bodega.Controller;
+
+
+import com.huaman.bodega.DTO.LoginRequest;
+import com.huaman.bodega.Entity.Usuario;
+import com.huaman.bodega.Service.JwtService;
+import com.huaman.bodega.Service.UsuarioService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/auth")
+@RequiredArgsConstructor
+public class AuthController {
+    private final UsuarioService usuarioService;
+    private final JwtService jwtService;
+    private final PasswordEncoder passwordEncoder;
+
+    @PostMapping("/login")
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest loginRequest) {
+        Usuario usuario = usuarioService.buscarUsuario(loginRequest.getUsuario());
+        if (!usuario.isEstado()) {
+            return ResponseEntity.status(403).body(String.format("El usuario %s no esta activo", loginRequest.getUsuario()));
+        }
+
+        if (passwordEncoder.matches(loginRequest.getPassword(), usuario.getPassword())) {
+            return ResponseEntity.ok(jwtService.generarToken(usuario));
+        }
+        return ResponseEntity.badRequest().build();
+    }
+
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Controller/ClienteController.java">
+package com.huaman.bodega.Controller;
+
+import com.huaman.bodega.DTO.ActualizarTopeRequest;
+import com.huaman.bodega.DTO.RegistrarAbonoRequest;
+import com.huaman.bodega.Entity.Cliente;
+import com.huaman.bodega.Entity.CuentaFiado;
+import com.huaman.bodega.Service.ClienteService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/clientes")
+@RequiredArgsConstructor
+public class ClienteController {
+
+    private final ClienteService clienteService;
+
+    @PostMapping
+    public Cliente registrar(@Valid @RequestBody Cliente cliente) {
+        return clienteService.registrar(cliente);
+    }
+
+    @PutMapping("/{id}")
+    public Cliente actualizar(@Valid @RequestBody Cliente cliente, @PathVariable Long id) {
+        cliente.setId(id);
+        return clienteService.actualizar(cliente);
+    }
+
+    @GetMapping("/listar")
+    public List<Cliente> listar() {
+        return clienteService.listar();
+    }
+
+    @GetMapping("/{id}")
+    public Cliente buscarId(@PathVariable Long id) {
+        return clienteService.buscarId(id);
+    }
+
+    @GetMapping("/buscar")
+    public List<Cliente> buscarNombre(@RequestParam String nombre) {
+        return clienteService.buscarNombre(nombre);
+    }
+
+    @PatchMapping("/{id}/activar")
+    public Cliente activar(@PathVariable Long id) {
+        return clienteService.activar(id);
+    }
+
+    @PatchMapping("/{id}/desactivar")
+    public Cliente desactivar(@PathVariable Long id) {
+        return clienteService.desactivar(id);
+    }
+
+    @GetMapping("/{id}/cuenta-fiado")
+    public CuentaFiado verCuentaFiado(@PathVariable Long id) {
+        return clienteService.verCuentaFiado(id);
+    }
+
+    @PatchMapping("/{id}/cuenta-fiado/tope")
+    public CuentaFiado actualizarTope(@PathVariable Long id, @Valid @RequestBody ActualizarTopeRequest request) {
+        return clienteService.actualizarTope(id, request.getTope());
+    }
+
+    @PatchMapping("/{id}/cuenta-fiado/activar")
+    public CuentaFiado activarFiado(@PathVariable Long id) {
+        return clienteService.activarFiado(id);
+    }
+
+    @PatchMapping("/{id}/cuenta-fiado/desactivar")
+    public CuentaFiado desactivarFiado(@PathVariable Long id) {
+        return clienteService.desactivarFiado(id);
+    }
+
+    @PostMapping("/{id}/cuenta-fiado/abono")
+    public CuentaFiado registrarAbono(@PathVariable Long id, @Valid @RequestBody RegistrarAbonoRequest request) {
+        return clienteService.registrarAbono(id, request.getMonto());
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Controller/ConfiguracionFiadoController.java">
+package com.huaman.bodega.Controller;
+
+import com.huaman.bodega.DTO.ActualizarConfiguracionFiadoRequest;
+import com.huaman.bodega.Entity.ConfiguracionFiado;
+import com.huaman.bodega.Service.ConfiguracionFiadoService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/configuracion/fiado")
+@RequiredArgsConstructor
+public class ConfiguracionFiadoController {
+
+    private final ConfiguracionFiadoService configuracionFiadoService;
+
+    // Cualquier usuario autenticado puede consultarla (el vendedor necesita
+    // saber el límite/estado global al momento de vender)
+    @GetMapping
+    public ConfiguracionFiado obtener() {
+        return configuracionFiadoService.obtener();
+    }
+
+    // Solo el administrador puede cambiarla (restringido en SecurityConfig)
+    @PutMapping
+    public ConfiguracionFiado actualizar(@Valid @RequestBody ActualizarConfiguracionFiadoRequest request) {
+        return configuracionFiadoService.actualizar(
+                request.getLimiteFiadoGlobal(),
+                request.getFiadoHabilitadoGlobal()
+        );
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Controller/VentaController.java">
+package com.huaman.bodega.Controller;
+
+import com.huaman.bodega.Config.UsuarioDetails;
+import com.huaman.bodega.DTO.CrearVentaRequest;
+import com.huaman.bodega.DTO.VentaResponse;
+import com.huaman.bodega.Entity.Usuario;
+import com.huaman.bodega.Entity.Venta;
+import com.huaman.bodega.Service.UsuarioService;
+import com.huaman.bodega.Service.VentaService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/ventas")
+@RequiredArgsConstructor
+public class VentaController {
+
+    private final VentaService ventaService;
+    private final UsuarioService usuarioService;
+
+    @PostMapping
+    public VentaResponse registrar(
+            @Valid @RequestBody CrearVentaRequest request,
+            @AuthenticationPrincipal UsuarioDetails usuarioDetails
+    ) {
+        Usuario usuarioLogueado = usuarioService.buscarUsuario(usuarioDetails.getUsername());
+        return ventaService.registrar(request, usuarioLogueado);
+    }
+
+    @PatchMapping("/{id}/anular")
+    public Venta anular(@PathVariable Long id) {
+        return ventaService.anular(id);
+    }
+
+    @GetMapping("/{id}")
+    public Venta buscarId(@PathVariable Long id) {
+        return ventaService.buscarId(id);
+    }
+
+    @GetMapping
+    public List<Venta> listar() {
+        return ventaService.listar();
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/DTO/ActualizarConfiguracionFiadoRequest.java">
+package com.huaman.bodega.DTO;
+
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
+import lombok.Data;
+
+import java.math.BigDecimal;
+
+@Data
+public class ActualizarConfiguracionFiadoRequest {
+    //Atributos - Actualizar Configuración Fiado Request
+
+    @NotNull
+    @PositiveOrZero
+    private BigDecimal limiteFiadoGlobal;
+
+    @NotNull
+    private Boolean fiadoHabilitadoGlobal;
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/DTO/ActualizarTopeRequest.java">
+package com.huaman.bodega.DTO;
+
+import jakarta.validation.constraints.PositiveOrZero;
+import lombok.Data;
+
+import java.math.BigDecimal;
+
+@Data
+public class ActualizarTopeRequest {
+    // null = usar el límite global en vez de uno individual
+    @PositiveOrZero
+    private BigDecimal tope;
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/DTO/CambiarPasswordRequest.java">
+package com.huaman.bodega.DTO;
+
+import lombok.Data;
+
+@Data
+public class CambiarPasswordRequest {
+    private String password;
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/DTO/CambiarUsuarioRequest.java">
+package com.huaman.bodega.DTO;
+
+import lombok.Data;
+
+@Data
+public class CambiarUsuarioRequest {
+    private String usuario;
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/DTO/CrearVentaRequest.java">
+package com.huaman.bodega.DTO;
+
+import com.huaman.bodega.Entity.MetodoPago;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import lombok.Data;
+
+import java.util.List;
+
+@Data
+public class CrearVentaRequest {
+
+    // null = cliente no registrado (venta anónima)
+    private Long clienteId;
+
+    @NotNull
+    private MetodoPago metodoPago;
+
+    @NotEmpty
+    @Valid
+    private List<ItemVentaRequest> items;
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/DTO/ItemVentaRequest.java">
+package com.huaman.bodega.DTO;
+
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import lombok.Data;
+
+import java.math.BigDecimal;
+
+@Data
+public class ItemVentaRequest {
+
+    @NotNull
+    private Long productoId;
+
+    @NotNull
+    @Positive
+    private BigDecimal cantidad;
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/DTO/LoginRequest.java">
+package com.huaman.bodega.DTO;
+
+import lombok.Data;
+
+@Data
+public class LoginRequest {
+    private String usuario;
+    private String password;
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/DTO/LoginResponse.java">
+package com.huaman.bodega.DTO;
+
+public class LoginResponse {
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/DTO/RegistrarAbonoRequest.java">
+package com.huaman.bodega.DTO;
+
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import lombok.Data;
+
+import java.math.BigDecimal;
+
+@Data
+public class RegistrarAbonoRequest {
+    @NotNull
+    @Positive
+    private BigDecimal monto;
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/DTO/UsuarioResponse.java">
+package com.huaman.bodega.DTO;
+
+import com.huaman.bodega.Entity.Rol;
+import com.huaman.bodega.Entity.Usuario;
+
+public record UsuarioResponse(Long id, String nombre, String usuario, Rol rol, boolean estado) {
+    public static UsuarioResponse fromEntity(Usuario usuario) {
+        return new UsuarioResponse(usuario.getId(), usuario.getNombre(), usuario.getUsuario(), usuario.getRol(), usuario.isEstado());
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/DTO/VentaResponse.java">
+package com.huaman.bodega.DTO;
+
+import com.huaman.bodega.Entity.Venta;
+import lombok.Getter;
+
+@Getter
+public class VentaResponse {
+
+    private final Venta venta;
+    private final boolean excedeLimiteFiado;
+    private final String mensajeAdvertencia;
+
+    public VentaResponse(Venta venta, boolean excedeLimiteFiado, String mensajeAdvertencia) {
+        this.venta = venta;
+        this.excedeLimiteFiado = excedeLimiteFiado;
+        this.mensajeAdvertencia = mensajeAdvertencia;
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Entity/Cliente.java">
+package com.huaman.bodega.Entity;
+
+import jakarta.persistence.*;
+import jakarta.validation.constraints.NotBlank;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+@Entity
+@Table(name = "clientes")
+@Getter
+@Setter
+@NoArgsConstructor
+public class Cliente {
+    //Atributos - Clientes
+
+    //ID
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    //Nombre
+    @NotBlank
+    @Column(length = 100, nullable = false)
+    private String nombre;
+
+    //Teléfono
+    @Column(length = 10, nullable = true)
+    private String telefono;
+
+    //Descripción
+    @Column(length = 255, nullable = true)
+    private String descripcion;
+
+    //Estado
+    @Column(nullable = false)
+    private boolean estado = true;
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Entity/ConfiguracionFiado.java">
+package com.huaman.bodega.Entity;
+
+import jakarta.persistence.*;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.math.BigDecimal;
+
+@Entity
+@Table(name = "configuracion_fiado")
+@Getter
+@Setter
+@NoArgsConstructor
+public class ConfiguracionFiado {
+
+    @Id
+    private Long id = 1L;
+
+    @NotNull
+    @PositiveOrZero
+    @Column(precision = 8, scale = 2, nullable = false)
+    private BigDecimal limiteFiadoGlobal = new BigDecimal("200.00");
+
+    @Column(nullable = false)
+    private boolean fiadoHabilitadoGlobal = true;
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Entity/CuentaFiado.java">
+package com.huaman.bodega.Entity;
+
+import jakarta.persistence.*;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.math.BigDecimal;
+
+@Entity
+@Table(name = "cuenta_fiados")
+@Getter
+@Setter
+@NoArgsConstructor
+public class CuentaFiado {
+    //Atributos - CuentaFiado
+
+    //ID
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    //Cliente
+    @OneToOne
+    @NotNull
+    @JoinColumn(name = "cliente_id",nullable = false)
+    private Cliente cliente;
+
+    //Saldo
+    @NotNull
+    @PositiveOrZero
+    @Column(precision = 8, scale = 2, nullable = false)
+    private BigDecimal saldo = BigDecimal.ZERO;
+
+    //Tope de crédito individual
+    @PositiveOrZero
+    @Column(precision = 8, scale = 2, nullable = true)
+    private BigDecimal topeIndividual;
+
+    //Fiado habilitado
+    @Column(nullable = false)
+    private boolean fiadoHabilitado = true;
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Entity/DetalleVenta.java">
+package com.huaman.bodega.Entity;
+
+import com.fasterxml.jackson.annotation.JsonBackReference;
+import jakarta.persistence.*;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.math.BigDecimal;
+
+@Entity
+@Table(name = "detalle_ventas")
+@Getter
+@Setter
+@NoArgsConstructor
+public class DetalleVenta {
+    //Atributos - DetalleVenta:
+
+    //ID
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    //Venta
+    @JsonBackReference
+    @ManyToOne
+    @JoinColumn(name = "venta_id", nullable = false)
+    private Venta venta;
+
+    //Producto
+    @NotNull
+    @ManyToOne
+    @JoinColumn(name = "producto_id", nullable = false)
+    private Producto producto;
+
+    //Cantidad
+    @NotNull
+    @Positive
+    @Column(precision = 8, scale = 2, nullable = false)
+    private BigDecimal cantidad;
+
+    //Precio unitario
+    @NotNull
+    @Positive
+    @Column(precision = 8, scale = 2, nullable = false)
+    private BigDecimal precioUnitario;
+
+    //Subtotal
+    public BigDecimal getSubtotal() {
+        return precioUnitario.multiply(cantidad);
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Entity/EstadoVenta.java">
+package com.huaman.bodega.Entity;
+
+public enum EstadoVenta {
+    REGISTRADA,
+    ANULADA
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Entity/MetodoPago.java">
+package com.huaman.bodega.Entity;
+
+public enum MetodoPago {
+    CONTADO, FIADO, YAPE
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Entity/Rol.java">
+package com.huaman.bodega.Entity;
+
+public enum Rol {
+    VENDEDOR, ADMINISTRADOR
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Entity/UnidadMetrica.java">
+package com.huaman.bodega.Entity;
+
+public enum UnidadMetrica {
+    UNIDAD, KILOGRAMO
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Entity/Usuario.java">
+package com.huaman.bodega.Entity;
+
+import jakarta.persistence.*;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import lombok.*;
+
+@Entity
+@Table(name = "usuarios")
+@Getter
+@Setter
+@NoArgsConstructor
+public class Usuario {
+
+    //Atributos - Usurio:
+
+    //ID
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    //Nombre
+    @NotBlank
+    @Column(length = 100, nullable = false)
+    private String nombre;
+
+    //Usuario
+    @NotBlank
+    @Column(length = 20, nullable = false, unique = true)
+    private String usuario;
+
+    //Contraseña
+    @NotBlank
+    @Column(length = 100, nullable = false)
+    private String password;
+
+    //Rol
+    @NotNull
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Rol rol;
+
+    //Estado
+    @Column(nullable = false)
+    private boolean estado = true;
+
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Entity/Venta.java">
+package com.huaman.bodega.Entity;
+
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+import jakarta.persistence.*;
+import jakarta.validation.constraints.NotNull;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+
+@Entity
+@Table(name = "ventas")
+@Getter
+@Setter
+@NoArgsConstructor
+public class Venta {
+    //Atributos - Venta:
+
+    //ID
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    //Fecha
+    @NotNull
+    @Column(nullable = false)
+    private LocalDateTime fecha = LocalDateTime.now();
+
+    //Cliente/Anonomi
+    @ManyToOne
+    @JoinColumn(name = "cliente_id", nullable = true)
+    private Cliente cliente;
+
+    //Vendedor
+    @NotNull
+    @ManyToOne
+    @JoinColumn(name = "usuario_id", nullable = false)
+    private Usuario usuario;
+
+    //Metodo de pago
+    @NotNull
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private MetodoPago metodoPago;
+
+    //Monto total
+    @NotNull
+    @Column(precision = 10, scale = 2, nullable = false)
+    private BigDecimal montoTotal;
+
+    //Estado
+    @NotNull
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private EstadoVenta estado = EstadoVenta.REGISTRADA;
+
+    //Detalles de la venta
+
+    @JsonManagedReference
+    @OneToMany(mappedBy = "venta", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<DetalleVenta> items = new ArrayList<>();
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Exception/ClienteNoEncontradoException.java">
+package com.huaman.bodega.Exception;
+
+public class ClienteNoEncontradoException extends RuntimeException {
+    public ClienteNoEncontradoException(String mensaje) {
+        super(mensaje);
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Exception/ClienteYaExisteException.java">
+package com.huaman.bodega.Exception;
+
+public class ClienteYaExisteException extends RuntimeException {
+    public ClienteYaExisteException(String mensaje) {
+        super(mensaje);
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Exception/ProductoNoEncontradoException.java">
+package com.huaman.bodega.Exception;
+
+public class ProductoNoEncontradoException extends RuntimeException{
+    public ProductoNoEncontradoException(String mensaje) {
+        super(mensaje);
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Exception/ProductoYaExisteException.java">
+package com.huaman.bodega.Exception;
+
+public class ProductoYaExisteException extends RuntimeException{
+    public ProductoYaExisteException(String mensaje) {
+        super(mensaje);
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Exception/StockInsuficienteException.java">
+package com.huaman.bodega.Exception;
+
+public class StockInsuficienteException extends RuntimeException{
+    public StockInsuficienteException(String mensaje) {
+        super(mensaje);
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Exception/UsuarioNoEncontradoException.java">
+package com.huaman.bodega.Exception;
+
+public class UsuarioNoEncontradoException extends RuntimeException{
+    public UsuarioNoEncontradoException(String mensaje) {
+        super(mensaje);
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Exception/UsuarioYaExisteException.java">
+package com.huaman.bodega.Exception;
+
+public class UsuarioYaExisteException extends RuntimeException{
+    public UsuarioYaExisteException(String mensaje) {
+        super(mensaje);
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Exception/VentaInvalidaException.java">
+package com.huaman.bodega.Exception;
+
+public class VentaInvalidaException extends RuntimeException {
+    public VentaInvalidaException(String mensaje) {
+        super(mensaje);
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Exception/VentaNoEncontradaException.java">
+package com.huaman.bodega.Exception;
+
+public class VentaNoEncontradaException extends RuntimeException {
+    public VentaNoEncontradaException(String mensaje) {
+        super(mensaje);
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Repository/ClienteRepository.java">
+package com.huaman.bodega.Repository;
+
+import com.huaman.bodega.Entity.Cliente;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+
+@Repository
+public interface ClienteRepository extends JpaRepository<Cliente, Long> {
+
+    List<Cliente> findByEstadoTrue();
+    List<Cliente> findByNombreContainingIgnoreCaseAndEstadoTrue(String nombres);
+    List<Cliente> findByNombreContainingIgnoreCase(String nombres);
+    Boolean existsByNombreAndTelefono(String nombres, String telefono);
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Repository/ConfiguracionFiadoRepository.java">
+package com.huaman.bodega.Repository;
+
+import com.huaman.bodega.Entity.ConfiguracionFiado;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface ConfiguracionFiadoRepository extends JpaRepository<ConfiguracionFiado, Long> {
+
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Repository/CuentaFiadoRepository.java">
+package com.huaman.bodega.Repository;
+
+import com.huaman.bodega.Entity.Cliente;
+import com.huaman.bodega.Entity.CuentaFiado;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface CuentaFiadoRepository extends JpaRepository<CuentaFiado, Long> {
+    Optional<CuentaFiado> findByCliente(Cliente cliente);
+    boolean existsByCliente(Cliente cliente);
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Repository/VentaRepository.java">
+package com.huaman.bodega.Repository;
+
+import com.huaman.bodega.Entity.Venta;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+
+@Repository
+public interface VentaRepository extends JpaRepository<Venta, Long> {
+    List<Venta> findByCliente(Long cliente);
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Service/ClienteService.java">
+package com.huaman.bodega.Service;
+
+import com.huaman.bodega.Entity.Cliente;
+import com.huaman.bodega.Entity.CuentaFiado;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+public interface ClienteService {
+    Cliente registrar(Cliente cliente);
+    Cliente actualizar(Cliente cliente);
+    List<Cliente> listar();
+    Cliente buscarId(Long id);
+    List<Cliente> buscarNombre(String nombre);
+    Cliente activar(Long id);
+    Cliente desactivar(Long id);
+
+    CuentaFiado verCuentaFiado(Long clienteId);
+    CuentaFiado actualizarTope(Long clienteId, BigDecimal tope);
+    CuentaFiado activarFiado(Long clienteId);
+    CuentaFiado desactivarFiado(Long clienteId);
+    CuentaFiado registrarAbono(Long clienteId, BigDecimal monto);
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Service/ClienteServiceImpl.java">
+package com.huaman.bodega.Service;
+
+import com.huaman.bodega.Entity.Cliente;
+import com.huaman.bodega.Entity.CuentaFiado;
+import com.huaman.bodega.Exception.ClienteNoEncontradoException;
+import com.huaman.bodega.Exception.ClienteYaExisteException;
+import com.huaman.bodega.Exception.VentaInvalidaException;
+import com.huaman.bodega.Repository.ClienteRepository;
+import com.huaman.bodega.Repository.CuentaFiadoRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class ClienteServiceImpl implements ClienteService {
+
+    private final ClienteRepository clienteRepository;
+    private final CuentaFiadoRepository cuentaFiadoRepository;
+
+    @Override
+    public Cliente registrar(Cliente cliente) {
+        if (cliente.getTelefono() != null
+                && clienteRepository.existsByNombreAndTelefono(cliente.getNombre(), cliente.getTelefono())) {
+            throw new ClienteYaExisteException("Ya existe un cliente registrado con ese nombre y teléfono");
+        }
+        return clienteRepository.save(cliente);
+    }
+
+    @Override
+    public Cliente actualizar(Cliente cliente) {
+        Cliente clienteFinal = buscarId(cliente.getId());
+        clienteFinal.setNombre(cliente.getNombre());
+        clienteFinal.setTelefono(cliente.getTelefono());
+        clienteFinal.setDescripcion(cliente.getDescripcion());
+        return clienteRepository.save(clienteFinal);
+    }
+
+    @Override
+    public List<Cliente> listar() {
+        return clienteRepository.findByEstadoTrue();
+    }
+
+    @Override
+    public Cliente buscarId(Long id) {
+        return clienteRepository.findById(id)
+                .orElseThrow(() -> new ClienteNoEncontradoException("El cliente con el id " + id + " no existe"));
+    }
+
+    @Override
+    public List<Cliente> buscarNombre(String nombre) {
+        return clienteRepository.findByNombreContainingIgnoreCaseAndEstadoTrue(nombre);
+    }
+
+    @Override
+    public Cliente activar(Long id) {
+        Cliente cliente = buscarId(id);
+        cliente.setEstado(true);
+        return clienteRepository.save(cliente);
+    }
+
+    @Override
+    public Cliente desactivar(Long id) {
+        Cliente cliente = buscarId(id);
+        cliente.setEstado(false);
+        return clienteRepository.save(cliente);
+    }
+
+    @Override
+    public CuentaFiado verCuentaFiado(Long clienteId) {
+        Cliente cliente = buscarId(clienteId);
+        return obtenerOCrearCuentaFiado(cliente);
+    }
+
+    @Override
+    public CuentaFiado actualizarTope(Long clienteId, BigDecimal tope) {
+        CuentaFiado cuentaFiado = verCuentaFiado(clienteId);
+        cuentaFiado.setTopeIndividual(tope); // null = vuelve a usar el límite global
+        return cuentaFiadoRepository.save(cuentaFiado);
+    }
+
+    @Override
+    public CuentaFiado activarFiado(Long clienteId) {
+        CuentaFiado cuentaFiado = verCuentaFiado(clienteId);
+        cuentaFiado.setFiadoHabilitado(true);
+        return cuentaFiadoRepository.save(cuentaFiado);
+    }
+
+    @Override
+    public CuentaFiado desactivarFiado(Long clienteId) {
+        CuentaFiado cuentaFiado = verCuentaFiado(clienteId);
+        cuentaFiado.setFiadoHabilitado(false);
+        return cuentaFiadoRepository.save(cuentaFiado);
+    }
+
+    @Override
+    public CuentaFiado registrarAbono(Long clienteId, BigDecimal monto) {
+        CuentaFiado cuentaFiado = verCuentaFiado(clienteId);
+        if (monto.compareTo(cuentaFiado.getSaldo()) > 0) {
+            throw new VentaInvalidaException(
+                    "El abono (S/ " + monto + ") no puede ser mayor a la deuda actual (S/ " + cuentaFiado.getSaldo() + ")");
+        }
+        cuentaFiado.setSaldo(cuentaFiado.getSaldo().subtract(monto));
+        return cuentaFiadoRepository.save(cuentaFiado);
+    }
+
+    private CuentaFiado obtenerOCrearCuentaFiado(Cliente cliente) {
+        return cuentaFiadoRepository.findByCliente(cliente)
+                .orElseGet(() -> {
+                    CuentaFiado nueva = new CuentaFiado();
+                    nueva.setCliente(cliente);
+                    nueva.setSaldo(BigDecimal.ZERO);
+                    return cuentaFiadoRepository.save(nueva);
+                });
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Service/ConfiguracionFiadoService.java">
+package com.huaman.bodega.Service;
+
+import com.huaman.bodega.Entity.ConfiguracionFiado;
+
+import java.math.BigDecimal;
+
+public interface ConfiguracionFiadoService {
+    ConfiguracionFiado obtener();
+    ConfiguracionFiado actualizar(BigDecimal limitePredeterminado, boolean fiadoHabilitadoGlobal);
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Service/ConfiguracionFiadoServiceImpl.java">
+package com.huaman.bodega.Service;
+
+import com.huaman.bodega.Entity.ConfiguracionFiado;
+import com.huaman.bodega.Repository.ConfiguracionFiadoRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.math.BigDecimal;
+
+@Service
+@RequiredArgsConstructor
+public class ConfiguracionFiadoServiceImpl implements ConfiguracionFiadoService {
+
+    private static final Long ID_UNICO = 1L;
+    private final ConfiguracionFiadoRepository configuracionFiadoRepository;
+
+    @Override
+    public ConfiguracionFiado obtener() {
+        // Si no existe la fila todavía (primera vez que se usa el sistema), la crea con valores por defecto
+        return configuracionFiadoRepository.findById(ID_UNICO)
+                .orElseGet(() -> {
+                    ConfiguracionFiado nueva = new ConfiguracionFiado();
+                    nueva.setId(ID_UNICO);
+                    return configuracionFiadoRepository.save(nueva);
+                });
+    }
+
+    @Override
+    public ConfiguracionFiado actualizar(BigDecimal limiteFiadoGlobal, boolean fiadoHabilitadoGlobal) {
+        ConfiguracionFiado configuracion = obtener();
+        configuracion.setLimiteFiadoGlobal(limiteFiadoGlobal);
+        configuracion.setFiadoHabilitadoGlobal(fiadoHabilitadoGlobal);
+        return configuracionFiadoRepository.save(configuracion);
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Service/JwtService.java">
+package com.huaman.bodega.Service;
+
+import com.auth0.jwt.JWT;
+import com.auth0.jwt.algorithms.Algorithm;
+import com.auth0.jwt.interfaces.DecodedJWT;
+import com.huaman.bodega.Entity.Usuario;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import java.util.Date;
+
+@Component
+public class JwtService {
+    //El secreto
+    @Value("${jwt.secret}")
+    private String secreto;
+
+    @Value("${jwt.expiration}")
+    private long expiracion;
+
+    //Generar token
+    public String generarToken(Usuario usuario){
+        Algorithm algorithm = Algorithm.HMAC256(secreto);
+        Date fechaExpiracion = new Date(System.currentTimeMillis() + expiracion);
+        return JWT.create()
+                .withSubject(usuario.getUsuario())
+                .withClaim("rol", usuario.getRol().name())
+                .withClaim("id", usuario.getId())
+                .withIssuedAt(new Date())
+                .withExpiresAt(fechaExpiracion)
+                .sign(algorithm);
+    }
+
+    public DecodedJWT validarToken(String token){
+        return JWT.require(Algorithm.HMAC256(secreto)).build().verify(token);
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Service/VentaService.java">
+package com.huaman.bodega.Service;
+
+import com.huaman.bodega.DTO.CrearVentaRequest;
+import com.huaman.bodega.DTO.VentaResponse;
+import com.huaman.bodega.Entity.Usuario;
+import com.huaman.bodega.Entity.Venta;
+
+import java.util.List;
+
+public interface VentaService {
+    VentaResponse registrar(CrearVentaRequest request, Usuario usuarioLogueado);
+    Venta anular(Long id);
+    Venta buscarId(Long id);
+    List<Venta> buscarCliente(Long clienteId);
+
+    List<Venta> listar();
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Service/VentaServiceImpl.java">
+package com.huaman.bodega.Service;
+
+import com.huaman.bodega.DTO.CrearVentaRequest;
+import com.huaman.bodega.DTO.ItemVentaRequest;
+import com.huaman.bodega.DTO.VentaResponse;
+import com.huaman.bodega.Entity.*;
+import com.huaman.bodega.Exception.ClienteNoEncontradoException;
+import com.huaman.bodega.Exception.VentaInvalidaException;
+import com.huaman.bodega.Exception.VentaNoEncontradaException;
+import com.huaman.bodega.Repository.ClienteRepository;
+import com.huaman.bodega.Repository.CuentaFiadoRepository;
+import com.huaman.bodega.Repository.VentaRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class VentaServiceImpl implements VentaService {
+
+    private final VentaRepository ventaRepository;
+    private final ClienteRepository clienteRepository;
+    private final CuentaFiadoRepository cuentaFiadoRepository;
+    private final ProductoService productoService;
+    private final ConfiguracionFiadoService configuracionFiadoService;
+
+    @Override
+    @Transactional
+    public VentaResponse registrar(CrearVentaRequest request, Usuario usuarioLogueado) {
+
+        // 1. Resolver cliente (null = venta anónima)
+        Cliente cliente = null;
+        if (request.getClienteId() != null) {
+            cliente = clienteRepository.findById(request.getClienteId())
+                    .orElseThrow(() -> new ClienteNoEncontradoException(
+                            "El cliente con el id " + request.getClienteId() + " no existe"));
+        }
+
+        // 2. Si es fiado, validar que se pueda fiar antes de tocar el stock
+        CuentaFiado cuentaFiado = null;
+        if (request.getMetodoPago() == MetodoPago.FIADO) {
+            if (cliente == null) {
+                throw new VentaInvalidaException("No se puede fiar a un cliente no registrado");
+            }
+
+            ConfiguracionFiado configuracion = configuracionFiadoService.obtener();
+            if (!configuracion.isFiadoHabilitadoGlobal()) {
+                throw new VentaInvalidaException("El fiado está deshabilitado en este momento");
+            }
+
+            Cliente clienteParaCuenta = cliente;
+            cuentaFiado = cuentaFiadoRepository.findByCliente(cliente)
+                    .orElseGet(() -> crearCuentaFiado(clienteParaCuenta));
+
+            if (!cuentaFiado.isFiadoHabilitado()) {
+                throw new VentaInvalidaException(
+                        "El cliente " + cliente.getNombre() + " tiene el fiado deshabilitado");
+            }
+        }
+
+        // 3. Armar la venta y sus items, descontando stock de cada producto
+        Venta venta = new Venta();
+        venta.setCliente(cliente);
+        venta.setUsuario(usuarioLogueado);
+        venta.setMetodoPago(request.getMetodoPago());
+        venta.setEstado(EstadoVenta.REGISTRADA);
+
+        BigDecimal montoTotal = BigDecimal.ZERO;
+
+        for (ItemVentaRequest itemRequest : request.getItems()) {
+            Producto producto = productoService.BuscarId(itemRequest.getProductoId());
+
+            DetalleVenta detalle = new DetalleVenta();
+            detalle.setVenta(venta);
+            detalle.setProducto(producto);
+            detalle.setCantidad(itemRequest.getCantidad());
+            detalle.setPrecioUnitario(producto.getPrecioVenta()); // copia el precio actual, no una referencia
+
+            venta.getItems().add(detalle);
+            montoTotal = montoTotal.add(detalle.getSubtotal());
+
+            // Lanza StockInsuficienteException si no alcanza — @Transactional revierte todo lo anterior
+            productoService.DisminuirStock(producto.getId(), itemRequest.getCantidad());
+        }
+
+        venta.setMontoTotal(montoTotal);
+        Venta ventaGuardada = ventaRepository.save(venta);
+
+        // 4. Si es fiado, cargar el monto a la cuenta y calcular si excede el límite
+        boolean excedeLimite = false;
+        String mensajeAdvertencia = null;
+
+        if (cuentaFiado != null) {
+            cuentaFiado.setSaldo(cuentaFiado.getSaldo().add(montoTotal));
+            cuentaFiadoRepository.save(cuentaFiado);
+
+            BigDecimal topeEfectivo = obtenerTopeEfectivo(cuentaFiado);
+            if (cuentaFiado.getSaldo().compareTo(topeEfectivo) > 0) {
+                excedeLimite = true;
+                mensajeAdvertencia = "El cliente " + cliente.getNombre()
+                        + " superó su límite de fiado (S/ " + topeEfectivo + "). Saldo actual: S/ "
+                        + cuentaFiado.getSaldo();
+            }
+        }
+
+        return new VentaResponse(ventaGuardada, excedeLimite, mensajeAdvertencia);
+    }
+
+    @Override
+    @Transactional
+    public Venta anular(Long id) {
+        Venta venta = buscarId(id);
+
+        if (venta.getEstado() == EstadoVenta.ANULADA) {
+            throw new VentaInvalidaException("Esta venta ya está anulada");
+        }
+
+        // Devolver el stock de cada producto
+        for (DetalleVenta detalle : venta.getItems()) {
+            productoService.AumentarStock(detalle.getProducto().getId(), detalle.getCantidad());
+        }
+
+        // Sí era fiado, revertir el cargo de la cuenta del cliente
+        if (venta.getMetodoPago() == MetodoPago.FIADO) {
+            CuentaFiado cuentaFiado = cuentaFiadoRepository.findByCliente(venta.getCliente())
+                    .orElseThrow(() -> new VentaInvalidaException(
+                            "No se encontró la cuenta fiada del cliente para revertir el cargo"));
+            cuentaFiado.setSaldo(cuentaFiado.getSaldo().subtract(venta.getMontoTotal()));
+            cuentaFiadoRepository.save(cuentaFiado);
+        }
+
+        venta.setEstado(EstadoVenta.ANULADA);
+        return ventaRepository.save(venta);
+    }
+
+    @Override
+    public Venta buscarId(Long id) {
+        return ventaRepository.findById(id)
+                .orElseThrow(() -> new VentaNoEncontradaException("La venta con el id " + id + " no existe"));
+    }
+
+    @Override
+    public List<Venta> buscarCliente(Long clienteId) {
+        return  ventaRepository.findByCliente(clienteId);
+    }
+
+    @Override
+    public List<Venta> listar() {
+        return ventaRepository.findAll();
+    }
+
+    private CuentaFiado crearCuentaFiado(Cliente cliente) {
+        CuentaFiado nueva = new CuentaFiado();
+        nueva.setCliente(cliente);
+        nueva.setSaldo(BigDecimal.ZERO);
+        return cuentaFiadoRepository.save(nueva);
+    }
+
+    private BigDecimal obtenerTopeEfectivo(CuentaFiado cuentaFiado) {
+        if (cuentaFiado.getTopeIndividual() != null) {
+            return cuentaFiado.getTopeIndividual();
+        }
+        return configuracionFiadoService.obtener().getLimiteFiadoGlobal();
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/BodegaApplication.java">
+package com.huaman.bodega;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@Slf4j
+@SpringBootApplication
+public class BodegaApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(BodegaApplication.class, args);
+    }
+
+}
+</file>
+
+<file path="src/test/java/com/huaman/bodega/BodegaApplicationTests.java">
+package com.huaman.bodega;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+
+@SpringBootTest
+class BodegaApplicationTests {
+
+    @Test
+    void contextLoads() {
+    }
+
+}
+</file>
+
+<file path=".gitattributes">
+/gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary
+</file>
+
+<file path=".gitignore">
+HELP.md
+.gradle
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+</file>
+
+<file path="build.gradle">
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.huaman.facturacion'
+version = '0.0.1-SNAPSHOT'
+description = 'Bodega'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    compileOnly 'org.projectlombok:lombok'
+    developmentOnly 'org.springframework.boot:spring-boot-devtools'
+    runtimeOnly 'com.mysql:mysql-connector-j'
+    annotationProcessor 'org.projectlombok:lombok'
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testCompileOnly 'org.projectlombok:lombok'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testAnnotationProcessor 'org.projectlombok:lombok'
+    implementation 'com.auth0:java-jwt:4.6.0'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+</file>
+
+<file path="gradlew">
+#!/bin/sh
+
+#
+# Copyright © 2015 the original authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+##############################################################################
+#
+#   Gradle start up script for POSIX generated by Gradle.
+#
+#   Important for running:
+#
+#   (1) You need a POSIX-compliant shell to run this script. If your /bin/sh is
+#       noncompliant, but you have some other compliant shell such as ksh or
+#       bash, then to run this script, type that shell name before the whole
+#       command line, like:
+#
+#           ksh Gradle
+#
+#       Busybox and similar reduced shells will NOT work, because this script
+#       requires all of these POSIX shell features:
+#         * functions;
+#         * expansions «$var», «${var}», «${var:-default}», «${var+SET}»,
+#           «${var#prefix}», «${var%suffix}», and «$( cmd )»;
+#         * compound commands having a testable exit status, especially «case»;
+#         * various built-in commands including «command», «set», and «ulimit».
+#
+#   Important for patching:
+#
+#   (2) This script targets any POSIX shell, so it avoids extensions provided
+#       by Bash, Ksh, etc; in particular arrays are avoided.
+#
+#       The "traditional" practice of packing multiple parameters into a
+#       space-separated string is a well documented source of bugs and security
+#       problems, so this is (mostly) avoided, by progressively accumulating
+#       options in "$@", and eventually passing that to Java.
+#
+#       Where the inherited environment variables (DEFAULT_JVM_OPTS, JAVA_OPTS,
+#       and GRADLE_OPTS) rely on word-splitting, this is performed explicitly;
+#       see the in-line comments for details.
+#
+#       There are tweaks for specific operating systems such as AIX, CygWin,
+#       Darwin, MinGW, and NonStop.
+#
+#   (3) This script is generated from the Groovy template
+#       https://github.com/gradle/gradle/blob/3d91ce3b8caaf77ad09f381f43615b715b53f72c/platforms/jvm/plugins-application/src/main/resources/org/gradle/api/internal/plugins/unixStartScript.txt
+#       within the Gradle project.
+#
+#       You can find Gradle at https://github.com/gradle/gradle/.
+#
+##############################################################################
+
+# Attempt to set APP_HOME
+
+# Resolve links: $0 may be a link
+app_path=$0
+
+# Need this for daisy-chained symlinks.
+while
+    APP_HOME=${app_path%"${app_path##*/}"}  # leaves a trailing /; empty if no leading path
+    [ -h "$app_path" ]
+do
+    ls=$( ls -ld "$app_path" )
+    link=${ls#*' -> '}
+    case $link in             #(
+      /*)   app_path=$link ;; #(
+      *)    app_path=$APP_HOME$link ;;
+    esac
+done
+
+# This is normally unused
+# shellcheck disable=SC2034
+APP_BASE_NAME=${0##*/}
+# Discard cd standard output in case $CDPATH is set (https://github.com/gradle/gradle/issues/25036)
+APP_HOME=$( cd -P "${APP_HOME:-./}" > /dev/null && printf '%s\n' "$PWD" ) || exit
+
+# Use the maximum available, or set MAX_FD != -1 to use that value.
+MAX_FD=maximum
+
+warn () {
+    echo "$*"
+} >&2
+
+die () {
+    echo
+    echo "$*"
+    echo
+    exit 1
+} >&2
+
+# OS specific support (must be 'true' or 'false').
+cygwin=false
+msys=false
+darwin=false
+nonstop=false
+case "$( uname )" in                #(
+  CYGWIN* )         cygwin=true  ;; #(
+  Darwin* )         darwin=true  ;; #(
+  MSYS* | MINGW* )  msys=true    ;; #(
+  NONSTOP* )        nonstop=true ;;
+esac
+
+
+
+# Determine the Java command to use to start the JVM.
+if [ -n "$JAVA_HOME" ] ; then
+    if [ -x "$JAVA_HOME/jre/sh/java" ] ; then
+        # IBM's JDK on AIX uses strange locations for the executables
+        JAVACMD=$JAVA_HOME/jre/sh/java
+    else
+        JAVACMD=$JAVA_HOME/bin/java
+    fi
+    if [ ! -x "$JAVACMD" ] ; then
+        die "ERROR: JAVA_HOME is set to an invalid directory: $JAVA_HOME
+
+Please set the JAVA_HOME variable in your environment to match the
+location of your Java installation."
+    fi
+else
+    JAVACMD=java
+    if ! command -v java >/dev/null 2>&1
+    then
+        die "ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.
+
+Please set the JAVA_HOME variable in your environment to match the
+location of your Java installation."
+    fi
+fi
+
+# Increase the maximum file descriptors if we can.
+if ! "$cygwin" && ! "$darwin" && ! "$nonstop" ; then
+    case $MAX_FD in #(
+      max*)
+        # In POSIX sh, ulimit -H is undefined. That's why the result is checked to see if it worked.
+        # shellcheck disable=SC2039,SC3045
+        MAX_FD=$( ulimit -H -n ) ||
+            warn "Could not query maximum file descriptor limit"
+    esac
+    case $MAX_FD in  #(
+      '' | soft) :;; #(
+      *)
+        # In POSIX sh, ulimit -n is undefined. That's why the result is checked to see if it worked.
+        # shellcheck disable=SC2039,SC3045
+        ulimit -n "$MAX_FD" ||
+            warn "Could not set maximum file descriptor limit to $MAX_FD"
+    esac
+fi
+
+# Collect all arguments for the java command, stacking in reverse order:
+#   * args from the command line
+#   * the main class name
+#   * -classpath
+#   * -D...appname settings
+#   * --module-path (only if needed)
+#   * DEFAULT_JVM_OPTS, JAVA_OPTS, and GRADLE_OPTS environment variables.
+
+# For Cygwin or MSYS, switch paths to Windows format before running java
+if "$cygwin" || "$msys" ; then
+    APP_HOME=$( cygpath --path --mixed "$APP_HOME" )
+
+    JAVACMD=$( cygpath --unix "$JAVACMD" )
+
+    # Now convert the arguments - kludge to limit ourselves to /bin/sh
+    for arg do
+        if
+            case $arg in                                #(
+              -*)   false ;;                            # don't mess with options #(
+              /?*)  t=${arg#/} t=/${t%%/*}              # looks like a POSIX filepath
+                    [ -e "$t" ] ;;                      #(
+              *)    false ;;
+            esac
+        then
+            arg=$( cygpath --path --ignore --mixed "$arg" )
+        fi
+        # Roll the args list around exactly as many times as the number of
+        # args, so each arg winds up back in the position where it started, but
+        # possibly modified.
+        #
+        # NB: a `for` loop captures its iteration list before it begins, so
+        # changing the positional parameters here affects neither the number of
+        # iterations, nor the values presented in `arg`.
+        shift                   # remove old arg
+        set -- "$@" "$arg"      # push replacement arg
+    done
+fi
+
+
+# Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
+DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
+
+# Collect all arguments for the java command:
+#   * DEFAULT_JVM_OPTS, JAVA_OPTS, and optsEnvironmentVar are not allowed to contain shell fragments,
+#     and any embedded shellness will be escaped.
+#   * For example: A user cannot expect ${Hostname} to be expanded, as it is an environment variable and will be
+#     treated as '${Hostname}' itself on the command line.
+
+set -- \
+        "-Dorg.gradle.appname=$APP_BASE_NAME" \
+        -jar "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" \
+        "$@"
+
+# Stop when "xargs" is not available.
+if ! command -v xargs >/dev/null 2>&1
+then
+    die "xargs is not available"
+fi
+
+# Use "xargs" to parse quoted args.
+#
+# With -n1 it outputs one arg per line, with the quotes and backslashes removed.
+#
+# In Bash we could simply go:
+#
+#   readarray ARGS < <( xargs -n1 <<<"$var" ) &&
+#   set -- "${ARGS[@]}" "$@"
+#
+# but POSIX shell has neither arrays nor command substitution, so instead we
+# post-process each arg (as a line of input to sed) to backslash-escape any
+# character that might be a shell metacharacter, then use eval to reverse
+# that process (while maintaining the separation between arguments), and wrap
+# the whole thing up as a single "set" statement.
+#
+# This will of course break if any of these variables contains a newline or
+# an unmatched quote.
+#
+
+eval "set -- $(
+        printf '%s\n' "$DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS" |
+        xargs -n1 |
+        sed ' s~[^-[:alnum:]+,./:=@_]~\\&~g; ' |
+        tr '\n' ' '
+    )" '"$@"'
+
+exec "$JAVACMD" "$@"
+</file>
+
+<file path="gradlew.bat">
+@rem
+@rem Copyright 2015 the original author or authors.
+@rem
+@rem Licensed under the Apache License, Version 2.0 (the "License");
+@rem you may not use this file except in compliance with the License.
+@rem You may obtain a copy of the License at
+@rem
+@rem      https://www.apache.org/licenses/LICENSE-2.0
+@rem
+@rem Unless required by applicable law or agreed to in writing, software
+@rem distributed under the License is distributed on an "AS IS" BASIS,
+@rem WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+@rem See the License for the specific language governing permissions and
+@rem limitations under the License.
+@rem
+@rem SPDX-License-Identifier: Apache-2.0
+@rem
+
+@if "%DEBUG%"=="" @echo off
+@rem ##########################################################################
+@rem
+@rem  Gradle startup script for Windows
+@rem
+@rem ##########################################################################
+
+@rem Set local scope for the variables, and ensure extensions are enabled
+setlocal EnableExtensions
+
+set DIRNAME=%~dp0
+if "%DIRNAME%"=="" set DIRNAME=.
+@rem This is normally unused
+set APP_BASE_NAME=%~n0
+set APP_HOME=%DIRNAME%
+
+@rem Resolve any "." and ".." in APP_HOME to make it shorter.
+for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
+
+@rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
+set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
+
+@rem Find java.exe
+if defined JAVA_HOME goto findJavaFromJavaHome
+
+set JAVA_EXE=java.exe
+%JAVA_EXE% -version >NUL 2>&1
+if %ERRORLEVEL% equ 0 goto execute
+
+echo. 1>&2
+echo ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH. 1>&2
+echo. 1>&2
+echo Please set the JAVA_HOME variable in your environment to match the 1>&2
+echo location of your Java installation. 1>&2
+
+"%COMSPEC%" /c exit 1
+
+:findJavaFromJavaHome
+set JAVA_HOME=%JAVA_HOME:"=%
+set JAVA_EXE=%JAVA_HOME%/bin/java.exe
+
+if exist "%JAVA_EXE%" goto execute
+
+echo. 1>&2
+echo ERROR: JAVA_HOME is set to an invalid directory: %JAVA_HOME% 1>&2
+echo. 1>&2
+echo Please set the JAVA_HOME variable in your environment to match the 1>&2
+echo location of your Java installation. 1>&2
+
+"%COMSPEC%" /c exit 1
+
+:execute
+@rem Setup the command line
+
+
+
+@rem Execute Gradle
+@rem endlocal doesn't take effect until after the line is parsed and variables are expanded
+@rem which allows us to clear the local environment before executing the java command
+endlocal & "%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -jar "%APP_HOME%\gradle\wrapper\gradle-wrapper.jar" %* & call :exitWithErrorLevel
+
+:exitWithErrorLevel
+@rem Use "%COMSPEC%" /c exit to allow operators to work properly in scripts
+"%COMSPEC%" /c exit %ERRORLEVEL%
+</file>
+
+<file path="repomix-output1.xml">
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+gradle/
+  wrapper/
+    gradle-wrapper.jar
+    gradle-wrapper.properties
+src/
+  main/
+    java/
+      com/
+        huaman/
+          bodega/
+            Config/
+              AdminInitializer.java
+              JwtAuthFilter.java
+              SecurityConfig.java
+              UsuarioDetails.java
+              UsuarioDetailsService.java
+            Controller/
+              AuthController.java
+              ClienteController.java
+              ConfiguracionFiadoController.java
+              ProductoController.java
+              UsuarioController.java
+              VentaController.java
+            DTO/
+              ActualizarConfiguracionFiadoRequest.java
+              ActualizarTopeRequest.java
+              CambiarPasswordRequest.java
+              CambiarUsuarioRequest.java
+              CrearVentaRequest.java
+              ItemVentaRequest.java
+              LoginRequest.java
+              LoginResponse.java
+              RegistrarAbonoRequest.java
+              UsuarioResponse.java
+              VentaResponse.java
+            Entity/
+              Cliente.java
+              ConfiguracionFiado.java
+              CuentaFiado.java
+              DetalleVenta.java
+              EstadoVenta.java
+              MetodoPago.java
+              Producto.java
+              Rol.java
+              UnidadMetrica.java
+              Usuario.java
+              Venta.java
+            Exception/
+              ClienteNoEncontradoException.java
+              ClienteYaExisteException.java
+              GlobalExceptionHandler.java
+              ProductoNoEncontradoException.java
+              ProductoYaExisteException.java
+              StockInsuficienteException.java
+              UsuarioNoEncontradoException.java
+              UsuarioYaExisteException.java
+              VentaInvalidaException.java
+              VentaNoEncontradaException.java
+            Repository/
+              ClienteRepository.java
+              ConfiguracionFiadoRepository.java
+              CuentaFiadoRepository.java
+              ProductoRepository.java
+              UsuarioRepository.java
+              VentaRepository.java
+            Service/
+              ClienteService.java
+              ClienteServiceImpl.java
+              ConfiguracionFiadoService.java
+              ConfiguracionFiadoServiceImpl.java
+              JwtService.java
+              ProductoService.java
+              ProductoServiceImpl.java
+              UsuarioService.java
+              UsuarioServiceImpl.java
+              VentaService.java
+              VentaServiceImpl.java
+            BodegaApplication.java
+    resources/
+      application.properties
+  test/
+    java/
+      com/
+        huaman/
+          bodega/
+            BodegaApplicationTests.java
+.gitattributes
+.gitignore
+build.gradle
+gradlew
+gradlew.bat
+README.md
 settings.gradle
 </directory_structure>
 
@@ -2784,6 +4865,754 @@ endlocal & "%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.grad
 
 <file path="settings.gradle">
 rootProject.name = 'Bodega'
+</file>
+
+<file path="src/main/resources/application.properties">
+spring.application.name=Bodega
+
+spring.datasource.url=jdbc:mysql://localhost:3306/bodega_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=America/Lima
+spring.datasource.username=${DB_USERNAME}
+spring.datasource.password=${DB_PASSWORD}
+spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+spring.jpa.database-platform=org.hibernate.dialect.MySQLDialect
+
+server.port=8080
+
+jwt.secret=${JWT_SECRET}
+jwt.expiration=86400000
+</file>
+
+<file path="README.md">
+# Bodega-Backend
+# Bodega-Backend
+# Bodega-Backend
+# Bodega-Backend
+</file>
+
+</files>
+</file>
+
+<file path="settings.gradle">
+rootProject.name = 'Bodega'
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Config/SecurityConfig.java">
+package com.huaman.bodega.Config;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
+
+@Configuration
+@RequiredArgsConstructor
+public class SecurityConfig {
+    private final JwtAuthFilter jwtAuthFilter;
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http.csrf(AbstractHttpConfigurer::disable);
+        http.cors(cors -> cors.configurationSource(corsConfigurationSource())); // <- nuevo
+        http.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+        http.addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+        http.authorizeHttpRequests(auth -> auth
+                .requestMatchers("/auth/login").permitAll()
+                .requestMatchers("/usuarios/me/**").authenticated()
+                .requestMatchers("/usuarios/**").hasRole("ADMINISTRADOR")
+                .requestMatchers(HttpMethod.PUT, "/configuracion/**").hasRole("ADMINISTRADOR")
+                .anyRequest().authenticated()
+        );
+        return http.build();
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        // En desarrollo, "*" está bien. Antes de tener usuarios reales, restringe a tus orígenes reales.
+        configuration.setAllowedOriginPatterns(List.of("*"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("*"));
+        configuration.setAllowCredentials(true);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Controller/ProductoController.java">
+package com.huaman.bodega.Controller;
+
+import com.huaman.bodega.Entity.Producto;
+import com.huaman.bodega.Service.ProductoService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+@RestController
+@RequestMapping("/productos")
+@RequiredArgsConstructor
+public class ProductoController {
+    private final ProductoService productoService;
+
+    //Listar todos los productos
+    @GetMapping("/listar")
+    public List<Producto> listar(){
+        return productoService.Listar();
+    }
+
+    //Listar todos los productos desactivados
+    @GetMapping("/listar-desactivados")
+    public List<Producto> listarDesactivados(){
+        return productoService.ListarDesactivados();
+    }
+
+    //Buscar por id
+    @GetMapping("/{id}")
+    public Producto buscarId(@Valid @PathVariable Long id){
+        return productoService.BuscarId(id);
+    }
+
+    //Buscar por nombre
+    @GetMapping("/buscar")
+    public List<Producto> buscarNombre(@Valid @RequestParam String nombre){
+        return productoService.BuscarNombre(nombre);
+    }
+
+    //Registrar un producto
+    @PostMapping
+    public Producto registrar(@Valid @RequestBody Producto producto){
+        return productoService.Registrar(producto);
+    }
+
+    //Actualizar un producto
+    @PutMapping("/{id}")
+    public Producto actualizar(@Valid @RequestBody Producto producto, @PathVariable Long id){
+        producto.setId(id);
+        return productoService.Actualizar(producto);
+    }
+
+    //Desactivar un producto
+    @PatchMapping("/{id}/desactivar")
+    public Producto desactivar(@Valid @PathVariable Long id){
+        return productoService.Desactivar(id);
+    }
+
+    //Activar un producto
+    @PatchMapping("/{id}/activar")
+    public Producto activar(@Valid @PathVariable Long id){
+        return productoService.Activar(id);
+    }
+
+    //Aumentar Stock
+    @PatchMapping("/{id}/aumentar-stock")
+    public Producto aumentarStock(@Valid @PathVariable Long id, @RequestParam BigDecimal cantidad){
+        return productoService.AumentarStock(id, cantidad);
+    }
+
+    //Disminuir Stock
+    @PatchMapping("/{id}/disminuir-stock")
+    public Producto disminuirStock(@Valid @PathVariable Long id, @RequestParam BigDecimal cantidad){
+        return productoService.DisminuirStock(id, cantidad);
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Controller/UsuarioController.java">
+package com.huaman.bodega.Controller;
+
+import com.huaman.bodega.Config.UsuarioDetails;
+import com.huaman.bodega.DTO.CambiarPasswordRequest;
+import com.huaman.bodega.DTO.CambiarUsuarioRequest;
+import com.huaman.bodega.DTO.UsuarioResponse;
+import com.huaman.bodega.Entity.Usuario;
+import com.huaman.bodega.Service.UsuarioService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/usuarios")
+@RequiredArgsConstructor
+public class UsuarioController{
+    private final UsuarioService usuarioService;
+
+    //Registrar usuario
+    @PostMapping
+    public ResponseEntity<?> registrar(@Valid @RequestBody Usuario usuario) {
+        return ResponseEntity.ok(UsuarioResponse.fromEntity(usuarioService.registrar(usuario)));
+    }
+
+    //Actualizar usuario
+    @PutMapping("/{id}")
+    public ResponseEntity<?> actualizar(@Valid@RequestBody Usuario usuario, @Valid@PathVariable Long id){
+        usuario.setId(id);
+        return ResponseEntity.ok(UsuarioResponse.fromEntity(usuarioService.actualizar(usuario)));
+    }
+
+    //listar usuarios
+    @GetMapping("/listar")
+    public ResponseEntity<?> listar(){
+        return ResponseEntity.ok(usuarioService.listar().stream().map(UsuarioResponse::fromEntity).toList());
+    }
+
+    @GetMapping("listar-desactivos")
+    public ResponseEntity<?> listarDesactivados(){
+        return ResponseEntity.ok(usuarioService.listarDesactivados().stream().map(UsuarioResponse::fromEntity).toList());
+    }
+
+    //Buscar Usuario por ID
+    @GetMapping("/{id}")
+    public ResponseEntity<?> buscarId(@Valid @PathVariable Long id){
+        return ResponseEntity.ok(UsuarioResponse.fromEntity(usuarioService.buscarId(id)));
+    }
+
+    //Buscar Usuario por nombre
+    @GetMapping("/buscar")
+    public ResponseEntity<?> buscarUsuario(@Valid @RequestParam String usuario){
+        return ResponseEntity.ok(UsuarioResponse.fromEntity(usuarioService.buscarUsuario(usuario)));
+    }
+
+    //Activar usuario
+    @PatchMapping("/{id}/activar")
+    public ResponseEntity<?> activarUsuario(@Valid @PathVariable Long id){
+        return ResponseEntity.ok(UsuarioResponse.fromEntity(usuarioService.activarUsuario(id)));
+    }
+
+    //Desactivar usuario
+    @PatchMapping("/{id}/desactivar")
+    public ResponseEntity<?> desactivarUsuario(@Valid @PathVariable Long id){
+        return ResponseEntity.ok(UsuarioResponse.fromEntity(usuarioService.desactivarUsuario(id)));
+    }
+
+    //Cambiar Contraseña
+    @PatchMapping("/{id}/password")
+    public ResponseEntity<?> cambiarContraseña(@Valid @PathVariable Long id,@Valid @RequestBody CambiarPasswordRequest request){
+        return ResponseEntity.ok(UsuarioResponse.fromEntity(usuarioService.cambiarContraseña(id, request.getPassword())));
+    }
+
+    @PatchMapping("/{id}/usuario")
+    public ResponseEntity<?> cambiarUsuario(@Valid @PathVariable Long id,@Valid @RequestBody CambiarUsuarioRequest request){
+        return ResponseEntity.ok(UsuarioResponse.fromEntity(usuarioService.cambiarUsuario(id, request.getUsuario())));
+    }
+
+    @PatchMapping("/me/contraseña")
+    public ResponseEntity<?> cambiarMiContraseña(@Valid @AuthenticationPrincipal UsuarioDetails usuarioDetails,@Valid @RequestBody CambiarPasswordRequest request) {
+        Usuario usuario = usuarioService.buscarUsuario(usuarioDetails.getUsername());
+        return ResponseEntity.ok(UsuarioResponse.fromEntity(usuarioService.cambiarContraseña(usuario.getId(), request.getPassword())));
+    }
+
+    @PatchMapping("/me/usuario")
+    public ResponseEntity<?> cambiarMiUsuario(@Valid @AuthenticationPrincipal UsuarioDetails usuarioDetails,@Valid @RequestBody CambiarUsuarioRequest request) {
+        Usuario usuario = usuarioService.buscarUsuario(usuarioDetails.getUsername());
+        return ResponseEntity.ok(UsuarioResponse.fromEntity(usuarioService.cambiarUsuario(usuario.getId(), request.getUsuario())));
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Entity/Producto.java">
+package com.huaman.bodega.Entity;
+
+import jakarta.persistence.*;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import java.math.BigDecimal;
+
+@Entity
+@Table(name = "productos", uniqueConstraints = @UniqueConstraint(columnNames = { "nombre", "marca"}))
+@Setter
+@Getter
+@NoArgsConstructor
+public class Producto {
+    //Atributos - Producto:
+
+    //ID
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    //Nombre
+    @NotBlank
+    @Column(length = 100, nullable = false)
+    private String nombre;
+
+    //Marca
+    @NotBlank
+    @Column(length = 100, nullable = false)
+    private String marca;
+
+    //Descripción
+    @Column(length = 255, nullable = true)
+    private String descripcion;
+
+    //Precio de venta
+    @NotNull
+    @PositiveOrZero
+    @Column(precision = 8, scale = 2, nullable = false)
+    private BigDecimal precioVenta;
+
+    //Precio de compra
+    @PositiveOrZero
+    @Column(precision = 8, scale = 2, nullable = true)
+    private BigDecimal precioCompra;
+
+    //Unidad de medida
+    @NotNull
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private UnidadMetrica unidadMetrica;
+
+    //Stock
+    @NotNull
+    @PositiveOrZero
+    @Column(precision = 8, scale = 2, nullable = false)
+    private BigDecimal stock;
+
+    //Estado
+    @Column(nullable = false)
+    private boolean estado = true;
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Exception/GlobalExceptionHandler.java">
+package com.huaman.bodega.Exception;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Map<String, String>> validationException(MethodArgumentNotValidException ex) {
+        Map<String, String> errores = new HashMap<>();
+        ex.getBindingResult().getFieldErrors()
+                .forEach(e -> errores.put(e.getField(), e.getDefaultMessage()));
+        return ResponseEntity.badRequest().body(errores);
+    }
+
+    //Producto no encontrado exception
+    @ExceptionHandler(ProductoNoEncontradoException.class)
+    public ResponseEntity<String> ProductoNoEncontradoException(ProductoNoEncontradoException ex) {
+        return ResponseEntity.status(404).body(ex.getMessage());
+    }
+
+    //Producto ya existe exception
+    @ExceptionHandler(ProductoYaExisteException.class)
+    public ResponseEntity<String> ProductoYaExisteException(ProductoYaExisteException ex) {
+        return ResponseEntity.status(409).body(ex.getMessage());
+    }
+
+    //Stock insuficiente exception
+    @ExceptionHandler(StockInsuficienteException.class)
+    public ResponseEntity<String> StockInsuficienteException(StockInsuficienteException ex) {
+        return ResponseEntity.status(409).body(ex.getMessage());
+    }
+
+    //Usuario ya existe exception
+    @ExceptionHandler(UsuarioYaExisteException.class)
+    public ResponseEntity<String> UsuarioYaExisteException(UsuarioYaExisteException ex) {
+        return ResponseEntity.status(409).body(ex.getMessage());
+    }
+
+    //Usuario encontrado exception
+    @ExceptionHandler(UsuarioNoEncontradoException.class)
+    public ResponseEntity<String> UsuarioNoEncontradoException(UsuarioNoEncontradoException ex) {
+        return ResponseEntity.status(404).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<String> excepcionGeneral(Exception ex) {
+        return ResponseEntity.status(500).body("Ocurrió un error inesperado en el servidor");
+    }
+
+    @ExceptionHandler(ClienteNoEncontradoException.class)
+    public ResponseEntity<String> clienteNoEncontradoException(ClienteNoEncontradoException ex) {
+        return ResponseEntity.status(404).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(VentaInvalidaException.class)
+    public ResponseEntity<String> ventaInvalidaException(VentaInvalidaException ex) {
+        return ResponseEntity.status(409).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(VentaNoEncontradaException.class)
+    public ResponseEntity<String> ventaNoEncontradaException(VentaNoEncontradaException ex) {
+        return ResponseEntity.status(404).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(ClienteYaExisteException.class)
+    public ResponseEntity<String> clienteYaExisteException(ClienteYaExisteException ex) {
+        return ResponseEntity.status(409).body(ex.getMessage());
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Repository/ProductoRepository.java">
+package com.huaman.bodega.Repository;
+
+import com.huaman.bodega.Entity.Producto;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public interface ProductoRepository extends JpaRepository<Producto, Long> {
+
+    List<Producto> findByEstadoTrueAndNombreContainingIgnoreCaseOrEstadoTrueAndMarcaContainingIgnoreCase(String nombre, String marca);
+    List<Producto> findByEstadoTrue();
+    List<Producto> findByEstadoFalse();
+    boolean existsByNombreAndMarca(String nombre, String marca);
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Repository/UsuarioRepository.java">
+package com.huaman.bodega.Repository;
+
+import com.huaman.bodega.Entity.Rol;
+import com.huaman.bodega.Entity.Usuario;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public interface UsuarioRepository extends JpaRepository<Usuario, Long> {
+
+    Optional<Usuario> findByUsuario(String usuario);
+    List<Usuario> findByNombreContainingIgnoreCase(String nombre);
+    boolean existsByUsuario(String usuario);
+    boolean existsByRol(Rol rol);
+    List<Usuario> findByEstadoTrue();
+    List<Usuario> findByEstadoFalse();
+
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Service/ProductoService.java">
+package com.huaman.bodega.Service;
+
+import com.huaman.bodega.Entity.Producto;
+import com.huaman.bodega.Entity.UnidadMetrica;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+public interface ProductoService {
+
+    public Producto Registrar(Producto producto);
+
+    public Producto Actualizar(Producto producto);
+
+    public List<Producto> Listar();
+
+    public List<Producto> ListarDesactivados();
+
+    public Producto Desactivar(Long id);
+
+    public Producto Activar(Long id);
+
+    public Producto BuscarId(long id);
+
+    public List<Producto> BuscarNombre(String nombre);
+
+    public Producto AumentarStock(Long id, BigDecimal cantidad);
+
+    public Producto DisminuirStock(Long id, BigDecimal cantidad);
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Service/ProductoServiceImpl.java">
+package com.huaman.bodega.Service;
+
+import com.huaman.bodega.Entity.Producto;
+import com.huaman.bodega.Exception.ProductoNoEncontradoException;
+import com.huaman.bodega.Exception.ProductoYaExisteException;
+import com.huaman.bodega.Exception.StockInsuficienteException;
+import com.huaman.bodega.Repository.ProductoRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class ProductoServiceImpl implements ProductoService {
+    private final ProductoRepository productoRepository;
+
+    @Override
+    public Producto Registrar(Producto producto) {
+        if(productoRepository.existsByNombreAndMarca(producto.getNombre(), producto.getMarca())){
+            throw new ProductoYaExisteException("El producto ya existe");
+        } else {
+            return productoRepository.save(producto);
+        }
+    }
+
+    @Override
+    public Producto Actualizar(Producto producto) {
+        Producto productoFinal = BuscarId(producto.getId());
+        productoFinal.setNombre(producto.getNombre());
+        productoFinal.setMarca(producto.getMarca());
+        productoFinal.setDescripcion(producto.getDescripcion());
+        productoFinal.setPrecioVenta(producto.getPrecioVenta());
+        productoFinal.setPrecioCompra(producto.getPrecioCompra());
+        productoFinal.setStock(producto.getStock());
+        productoFinal.setUnidadMetrica(producto.getUnidadMetrica());
+        return productoRepository.save(productoFinal);
+    }
+
+    @Override
+    public List<Producto> Listar() {
+        return productoRepository.findByEstadoTrue();
+    }
+
+    @Override
+    public List<Producto> ListarDesactivados() {
+        return productoRepository.findByEstadoFalse();
+    }
+
+    @Override
+    public Producto Desactivar(Long id) {
+        Producto productoFinal = BuscarId(id);
+        productoFinal.setEstado(false);
+        productoRepository.save(productoFinal);
+        return productoFinal;
+    }
+
+    @Override
+    public Producto Activar(Long id) {
+        Producto productoFinal = BuscarId(id);
+        productoFinal.setEstado(true);
+        productoRepository.save(productoFinal);
+        return productoFinal;
+    }
+
+    @Override
+    public Producto BuscarId(long id) {
+        return productoRepository.findById(id).orElseThrow(() -> new ProductoNoEncontradoException("El producto con el id " + id + " no existe"));
+    }
+
+    @Override
+    public List<Producto> BuscarNombre(String nombre) {
+        return productoRepository.findByEstadoTrueAndNombreContainingIgnoreCaseOrEstadoTrueAndMarcaContainingIgnoreCase(nombre, nombre);
+    }
+
+    @Override
+    public Producto AumentarStock(Long id, BigDecimal cantidad) {
+        Producto productoFinal = BuscarId(id);
+        productoFinal.setStock( productoFinal.getStock().add(cantidad));
+        productoRepository.save(productoFinal);
+        return productoFinal;
+    }
+
+    @Override
+    public Producto DisminuirStock(Long id, BigDecimal cantidad) {
+        Producto productoFinal = BuscarId(id);
+        if (0 >= cantidad.compareTo(productoFinal.getStock())){
+            productoFinal.setStock(productoFinal.getStock().subtract(cantidad));
+            productoRepository.save(productoFinal);
+            return productoFinal;
+        } else {
+            throw new StockInsuficienteException("El producto: " + productoFinal.getNombre() + " no tiene stock suficiente");
+        }
+    }
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Service/UsuarioService.java">
+package com.huaman.bodega.Service;
+
+import com.huaman.bodega.Entity.Usuario;
+
+import java.util.List;
+
+public interface UsuarioService {
+
+    //Registrar usuario
+    public Usuario registrar(Usuario usuario);
+
+    //Actualizar usuario
+    public Usuario actualizar(Usuario usuario);
+
+    //Buscar usuario por id
+    public Usuario buscarId(Long id);
+
+    //buscar usuario por usuario
+    public Usuario buscarUsuario(String usuario);
+
+    //Buscar usuario por nombre
+    public List<Usuario> buscarNombre(String nombre);
+
+    //Listar todos los usuarios activos
+    public List<Usuario> listar();
+
+    //Listar todos los usuarios desactivados
+    public List<Usuario> listarDesactivados();
+
+    //Activar usuario
+    public Usuario activarUsuario(Long id);
+
+    //Desactivar usuario
+    public Usuario desactivarUsuario(Long id);
+
+    //Cambiar contraseña
+    public Usuario cambiarContraseña(Long id,String password);
+
+    //Cambiar Usuario
+    public Usuario cambiarUsuario(Long id,String usuario);
+}
+</file>
+
+<file path="src/main/java/com/huaman/bodega/Service/UsuarioServiceImpl.java">
+package com.huaman.bodega.Service;
+
+import com.huaman.bodega.Entity.Usuario;
+import com.huaman.bodega.Exception.UsuarioNoEncontradoException;
+import com.huaman.bodega.Exception.UsuarioYaExisteException;
+import com.huaman.bodega.Repository.UsuarioRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.Optional;
+
+@Service
+@RequiredArgsConstructor
+public class UsuarioServiceImpl implements UsuarioService {
+    private final PasswordEncoder passwordEncoder;
+    private final UsuarioRepository UsuarioRepository;
+
+    //Registrar usuario
+    @Override
+    public Usuario registrar(Usuario usuario) {
+        if (UsuarioRepository.existsByUsuario(usuario.getUsuario())) {
+            throw new UsuarioYaExisteException("El usuario ya existe");
+        } else {
+            usuario.setPassword(passwordEncoder.encode(usuario.getPassword()));
+            return UsuarioRepository.save(usuario);
+        }
+    }
+
+    //Actualizar usuario
+    @Override
+    public Usuario actualizar(Usuario usuario) {
+        Usuario usuarioFinal = buscarId(usuario.getId());
+        usuarioFinal.setNombre(usuario.getNombre());
+        usuarioFinal.setRol(usuario.getRol());
+        return UsuarioRepository.save(usuarioFinal);
+    }
+
+    //Buscar usuario por ID
+    @Override
+    public Usuario buscarId(Long id) {
+        return UsuarioRepository.findById(id).orElseThrow(() -> new UsuarioNoEncontradoException("El usuario con el id " + id + " no existe"));
+    }
+
+    //Buscar usuario por usuario
+    @Override
+    public Usuario buscarUsuario(String usuario) {
+        return UsuarioRepository.findByUsuario(usuario).orElseThrow(() -> new UsuarioNoEncontradoException("El usuario con el usuario " + usuario + " no existe"));
+    }
+
+    //Buscar usuario por nombre
+    @Override
+    public List<Usuario> buscarNombre(String nombre) {
+        return UsuarioRepository.findByNombreContainingIgnoreCase(nombre);
+    }
+
+    //Listar todos los usuarios activos
+    @Override
+    public List<Usuario> listar() {
+        return UsuarioRepository.findByEstadoTrue();
+    }
+
+    //Listar todos los usuarios desactivados
+    @Override
+    public List<Usuario> listarDesactivados() {
+        return UsuarioRepository.findByEstadoFalse();
+    }
+
+    //Activar usuario
+    @Override
+    public Usuario activarUsuario(Long id) {
+        Usuario usuarioFinal = buscarId(id);
+        usuarioFinal.setEstado(true);
+        return UsuarioRepository.save(usuarioFinal);
+    }
+
+    //Desactivar usuario
+    @Override
+    public Usuario desactivarUsuario(Long id) {
+        Usuario usuarioFinal = buscarId(id);
+        usuarioFinal.setEstado(false);
+        return UsuarioRepository.save(usuarioFinal);
+    }
+
+    //Cambiar Contraseña
+    @Override
+    public Usuario cambiarContraseña(Long id, String password) {
+        Usuario usuarioFinal = buscarId(id);
+        usuarioFinal.setPassword(passwordEncoder.encode(password));
+        return UsuarioRepository.save(usuarioFinal);
+    }
+
+    //Cambiar Usuario
+    @Override
+    public Usuario cambiarUsuario(Long id, String usuario) {
+        Optional<Usuario> usuarioConEseNombre = UsuarioRepository.findByUsuario(usuario);
+
+        if (usuarioConEseNombre.isPresent() && !usuarioConEseNombre.get().getId().equals(id)) {
+            throw new UsuarioYaExisteException("El usuario ya existe");
+        } else {
+            Usuario usuarioFinal = buscarId(id);
+            usuarioFinal.setUsuario(usuario);
+            return UsuarioRepository.save(usuarioFinal);
+        }
+    }
+}
 </file>
 
 <file path="src/main/resources/application.properties">

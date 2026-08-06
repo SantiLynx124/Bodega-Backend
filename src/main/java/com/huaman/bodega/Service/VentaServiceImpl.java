@@ -143,6 +143,11 @@ public class VentaServiceImpl implements VentaService {
     }
 
     @Override
+    public List<Venta> buscarCliente(Long clienteId) {
+        return  ventaRepository.findByCliente(clienteId);
+    }
+
+    @Override
     public List<Venta> listar() {
         return ventaRepository.findAll();
     }
