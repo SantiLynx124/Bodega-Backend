@@ -3,10 +3,12 @@ package com.huaman.bodega.Controller;
 
 import com.huaman.bodega.DTO.LoginRequest;
 import com.huaman.bodega.Entity.Usuario;
+import com.huaman.bodega.Exception.UsuarioNoEncontradoException;
 import com.huaman.bodega.Service.JwtService;
 import com.huaman.bodega.Service.UsuarioService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -24,15 +26,23 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest loginRequest) {
-        Usuario usuario = usuarioService.buscarUsuario(loginRequest.getUsuario());
-        if (!usuario.isEstado()) {
-            return ResponseEntity.status(403).body(String.format("El usuario %s no esta activo", loginRequest.getUsuario()));
+        Usuario usuario;
+        try {
+            usuario = usuarioService.buscarUsuario(loginRequest.getUsuario());
+        } catch (UsuarioNoEncontradoException ex) {
+            // No revelamos si el usuario existe o no (evita enumeración de usuarios).
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Usuario o contraseña incorrectos");
         }
 
-        if (passwordEncoder.matches(loginRequest.getPassword(), usuario.getPassword())) {
-            return ResponseEntity.ok(jwtService.generarToken(usuario));
+        if (!usuario.isEstado()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("El usuario no está activo");
         }
-        return ResponseEntity.badRequest().build();
+
+        if (!passwordEncoder.matches(loginRequest.getPassword(), usuario.getPassword())) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Usuario o contraseña incorrectos");
+        }
+
+        return ResponseEntity.ok(jwtService.generarToken(usuario));
     }
 
 }
